@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<Mod
-    name="Quick Save / Load"
-    description="F5 quicksave, F9 quickload. Requires NoitaQuicksaveHelper.exe running before launch."
-    version="1"
->
-</Mod>

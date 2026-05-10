@@ -1,8 +1,7 @@
 using NoitaQuicksaveHelper;
 
-WriteSentinel();
-
-var save = new SaveManager();
+var save   = new SaveManager();
+var noita  = new NoitaController();
 
 // ---------------------------------------------------------------------------
 // ASP.NET Minimal API — localhost only, port 9518
@@ -13,114 +12,93 @@ builder.Logging.SetMinimumLevel(LogLevel.Warning);
 
 var app = builder.Build();
 
+// GET /status — check state without side-effects
 app.MapGet("/status", () => Results.Ok(new
 {
-    hasSave = save.HasSave,
-    savedAt = save.SavedAt?.ToString("o"),
+    hasSave       = save.HasSave,
+    savedAt       = save.SavedAt?.ToString("o"),
+    noitaRunning  = noita.IsRunning,
+    noitaExePath  = noita.ExePath,
 }));
 
-app.MapPost("/quicksave", () =>
+// POST /quicksave — snapshot save00; game keeps running
+app.MapPost("/quicksave", async () =>
 {
+    if (!noita.IsRunning)
+        return Results.BadRequest("Noita is not running. Nothing to save.");
+
     try
     {
         save.Quicksave();
-        SignalSender.SendSaveAck();
-        return Results.Ok("Quicksave complete.");
+        Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Quicksave created.");
+        return Results.Ok("Quicksave created.");
     }
     catch (Exception ex)
     {
+        Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Quicksave FAILED: {ex.Message}");
         return Results.Problem(ex.Message);
     }
 });
 
-app.MapPost("/quickload", () =>
+// POST /quickload — restore snapshot, restart Noita
+app.MapPost("/quickload", async () =>
 {
     if (!save.HasSave)
-        return Results.BadRequest("No quicksave found.");
+        return Results.BadRequest("No quicksave found. Press F5 in-game first.");
 
     try
     {
+        Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Quickload: closing Noita...");
+        await noita.CloseAndWaitAsync();
+
+        Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Quickload: restoring save...");
         save.Quickload();
-        SignalSender.SendLoadSignal();
-        return Results.Ok("Quickload complete.");
+
+        Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Quickload: launching Noita...");
+        noita.Launch();
+
+        Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Quickload complete.");
+        return Results.Ok("Quickload complete. Noita is restarting.");
     }
     catch (Exception ex)
     {
+        Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Quickload FAILED: {ex.Message}");
         return Results.Problem(ex.Message);
     }
 });
 
 // ---------------------------------------------------------------------------
-// Start the web server on the thread pool; keep the main thread free for the
-// Win32 message loop that WH_KEYBOARD_LL requires.
+// Start web server, then block the main thread on the Win32 message loop
+// (required for WH_KEYBOARD_LL to deliver callbacks without system-wide lag).
 // ---------------------------------------------------------------------------
-var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
-lifetime.ApplicationStopping.Register(KeyboardHook.StopMessageLoop);
-
-// Fire-and-forget: ASP.NET runs on thread-pool threads.
-var serverTask = app.StartAsync();
-await serverTask;  // wait until the server is actually listening before hooking
+await app.StartAsync();
 
 Console.WriteLine("NoitaQuicksaveHelper running on http://127.0.0.1:9518");
+Console.WriteLine("F5 = quicksave (instant)  |  F9 = quickload (restarts Noita)");
+Console.WriteLine("Press Ctrl-C to exit.");
 
 if (OperatingSystem.IsWindows())
 {
-    Console.WriteLine("Start Noita now. F5 = quicksave, F9 = quickload.");
-
-    // A plain static HttpClient is sufficient for fire-and-forget localhost calls.
     var http = new HttpClient();
+
+    Console.CancelKeyPress += (_, e) =>
+    {
+        e.Cancel = true;
+        KeyboardHook.StopMessageLoop();
+    };
 
     using var hook = new KeyboardHook(
         onF5: () => { _ = http.PostAsync("http://127.0.0.1:9518/quicksave", null); },
         onF9: () => { _ = http.PostAsync("http://127.0.0.1:9518/quickload", null); }
     );
 
-    // app.StartAsync() does not register SIGINT handlers (only RunAsync does).
-    // Wire Ctrl-C explicitly so it unblocks the message loop below.
-    Console.CancelKeyPress += (_, e) =>
-    {
-        e.Cancel = true;  // prevent the CLR from killing the process immediately
-        KeyboardHook.StopMessageLoop();
-    };
-
-    // Block the main thread on a Win32 message loop.
-    // This is what delivers WH_KEYBOARD_LL callbacks; without it every
-    // keypress system-wide lags ~300 ms while Windows times out waiting.
     KeyboardHook.RunMessageLoop();
-
     await app.StopAsync();
 }
 else
 {
-    Console.WriteLine("Linux: no keyboard hook available.");
-    Console.WriteLine("Bind F5/F9 in xbindkeys to:");
+    Console.WriteLine("Linux: bind F5/F9 via xbindkeys:");
     Console.WriteLine("  curl -X POST http://127.0.0.1:9518/quicksave");
     Console.WriteLine("  curl -X POST http://127.0.0.1:9518/quickload");
-
     await app.WaitForShutdownAsync();
-}
-
-// ---------------------------------------------------------------------------
-
-static void WriteSentinel()
-{
-    var exe    = AppContext.BaseDirectory;
-    var search = new DirectoryInfo(exe);
-
-    while (search != null)
-    {
-        var sentinel = Path.Combine(search.FullName, "noita-quicksave", "data", "helper_running.txt");
-        if (Directory.Exists(Path.GetDirectoryName(sentinel)))
-        {
-            File.WriteAllText(sentinel, DateTime.UtcNow.ToString("o"));
-            return;
-        }
-        search = search.Parent;
-    }
-
-    var fallback = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "NoitaQuicksaveHelper", "helper_running.txt");
-    Directory.CreateDirectory(Path.GetDirectoryName(fallback)!);
-    File.WriteAllText(fallback, DateTime.UtcNow.ToString("o"));
 }
