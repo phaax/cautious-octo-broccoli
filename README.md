@@ -13,7 +13,7 @@ original Lua DLL renamed as `lua51_orig.dll`.
   the restored save is not overwritten during normal shutdown.
 - Backups are stored in a visible `NoitaQuicksave` directory beside `noita.exe`.
 - Logs are written beside the game as `noita_quicksave.log`.
-- Built with .NET 8 NativeAOT as a native `win-x64` DLL.
+- Built as a 32-bit native C++ DLL to match Noita's 32-bit process.
 
 ## Warning
 
@@ -26,25 +26,22 @@ quicksave. If Steam Cloud is enabled, test carefully and keep an external backup
 ## Requirements
 
 - Windows Noita installation.
-- .NET 8 SDK.
-- Visual Studio or Build Tools with the MSVC linker and librarian available.
-- If building from WSL, call Windows `dotnet` through `cmd.exe`.
+- Visual Studio or Build Tools with MSVC C++ tools installed.
+- MSBuild from the Visual Studio installation.
 
 ## Build
 
 From this repository:
 
 ```bat
-cmd.exe /c "cd /d G:\Temp\NoitaQuickSave && dotnet publish NoitaQuicksaveDll\NoitaQuicksaveDll.csproj -c Release -r win-x64"
+"C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\MSBuild.exe" NoitaQuicksaveDll\NoitaQuicksaveDll.vcxproj /p:Configuration=Release /p:Platform=Win32
 ```
 
 The built DLL is written to:
 
 ```text
-NoitaQuicksaveDll\bin\Release\net8.0\win-x64\publish\lua51.dll
+NoitaQuicksaveDll\bin\Win32\Release\lua51.dll
 ```
-
-The `CA2255` `ModuleInitializer` analyzer warning is expected for this project.
 
 ## Install
 
@@ -108,13 +105,17 @@ created.
 
 ### Build fails with Lua unresolved externals
 
-Build through Windows `dotnet`, not the WSL Linux `dotnet`. The project creates
-a linker `.exp` file from `lua51_exports.def` to work around MSVC forwarder
-export handling.
+The project creates a linker `.exp` file from `lua51_exports.def` before linking.
+Build with MSBuild and the MSVC C++ toolchain so `lib.exe`, `cl.exe`, and
+`link.exe` are available.
+
+### Noita shows 0xc000007b on launch
+
+That usually means a 64-bit DLL was copied into Noita's 32-bit process. Build the
+`Release|Win32` target and install `NoitaQuicksaveDll\bin\Win32\Release\lua51.dll`.
 
 ## Development Notes
 
 - `lua51_exports.def` lists the Lua 5.1 exports forwarded to `lua51_orig.dll`.
-- `SaveManager.cs` handles copying `save00` to and from the backup directory.
-- `InputPoller.cs` handles `F5` and `F9`.
-- `Startup.cs` uses a module initializer so the poller starts when the DLL loads.
+- `NoitaQuicksave.cpp` handles the DLL entry point, `F5` and `F9`, save copying,
+  logging, and Noita restart.
