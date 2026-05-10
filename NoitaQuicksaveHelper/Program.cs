@@ -14,8 +14,8 @@ var save = new SaveManager();
 // ---------------------------------------------------------------------------
 var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.UseUrls("http://127.0.0.1:9518");
-// Suppress the default "Now listening on …" banner clutter
 builder.Logging.SetMinimumLevel(LogLevel.Warning);
+builder.Services.AddHttpClient();
 
 var app = builder.Build();
 
