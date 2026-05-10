@@ -1,8 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Mod
     name="Quick Save / Load"
-    description="F5 to quicksave, F9 to quickload. Requires Unsafe mods enabled."
+    description="F5 quicksave, F9 quickload. Requires NoitaQuicksaveHelper.exe running before launch."
     version="1"
-    request_no_api_restrictions="1"
 >
 </Mod>

@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>NoitaQuicksaveHelper</AssemblyName>
+    <RootNamespace>NoitaQuicksaveHelper</RootNamespace>
+    <!-- Single-file publish: dotnet publish -r win-x64 -p:PublishSingleFile=true -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+</Project>

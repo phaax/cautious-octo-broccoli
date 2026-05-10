@@ -1,43 +1,53 @@
--- Quick Save / Load mod for Noita
--- Requires: Unsafe mods enabled in Noita's mod settings
--- F5 = quicksave, F9 = quickload
+-- Quick Save / Load — safe Lua mod
+--
+-- This mod does NO file I/O itself. All heavy lifting (file copy, keyboard
+-- interception) is done by NoitaQuicksaveHelper.exe running alongside the game.
+-- The helper communicates back via two synthetic keypresses:
+--   VK_PAUSE  (0x13) → quicksave was completed; show confirmation message.
+--   VK_SCROLL (0x91) → quickload files are in place; trigger world reload.
+--
+-- SDL scancodes used by InputIsKeyJustDown:
+local KEY_PAUSE  = 119   -- Pause/Break
+local KEY_SCROLL = 78    -- Scroll Lock
 
-dofile("mods/noita-quicksave/files/quicksave.lua")
+local warned_no_helper = false
 
-local KEY_F5 = 114
-local KEY_F9 = 120
-
--- Minimum seconds between consecutive save/load actions (prevents double-press).
-local COOLDOWN_SECS = 1.0
-local last_action_time = 0
-
-local function cooldown_ok()
-    local now = GameGetRealWorldTimeDelta and
-        (last_action_time + COOLDOWN_SECS < GameGetFrameNum() / 60)
-        or true
-    return now
+local function helper_is_present()
+    -- The C# helper writes this file before the game starts.
+    -- ModTextFileGetContent reads from the VFS snapshotted at game startup.
+    local content = ModTextFileGetContent("data/helper_running.txt")
+    return content ~= nil and content ~= ""
 end
 
 local function player_is_alive()
     local players = EntityGetWithTag("player_unit")
-    return players and #players > 0
+    return players ~= nil and #players > 0
 end
 
 function OnModInit()
-    qs_init()
+    if not helper_is_present() then
+        GamePrint("[QuickSave] WARNING: NoitaQuicksaveHelper.exe not detected.")
+        GamePrint("[QuickSave] Start the helper before launching Noita.")
+        warned_no_helper = true
+    end
 end
 
 function OnWorldPostUpdate()
-    if InputIsKeyJustDown(KEY_F5) then
+    if InputIsKeyJustDown(KEY_PAUSE) then
+        -- C# helper finished copying save00 → backup.
+        GamePrint("Quick save created.")
+    end
+
+    if InputIsKeyJustDown(KEY_SCROLL) then
+        -- C# helper finished copying backup → save00; reload world from disk.
         if not player_is_alive() then
-            GamePrint("Cannot quicksave while dead.")
+            -- Dead players cannot reliably reload; the game would respawn them.
+            -- The C# helper should ideally not send this signal while dead,
+            -- but guard here too.
+            GamePrint("[QuickSave] Cannot reload while dead.")
             return
         end
-        last_action_time = GameGetFrameNum()
-        qs_save()
-
-    elseif InputIsKeyJustDown(KEY_F9) then
-        last_action_time = GameGetFrameNum()
-        qs_load()
+        GamePrint("Loading quick save...")
+        GameReloadActiveWorldFromSave()
     end
 end
