@@ -1,0 +1,18 @@
+* text=auto eol=lf
+
+# Windows binaries and native build artifacts
+*.dll binary
+*.exe binary
+*.pdb binary
+*.lib binary
+*.exp binary
+*.obj binary
+*.ilk binary
+
+# Common media/archive binaries
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.zip binary

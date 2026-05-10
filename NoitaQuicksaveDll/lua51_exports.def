@@ -1,0 +1,148 @@
+LIBRARY lua51
+EXPORTS
+; Core state
+lua_newstate = lua51_orig.lua_newstate
+lua_close = lua51_orig.lua_close
+lua_newthread = lua51_orig.lua_newthread
+lua_atpanic = lua51_orig.lua_atpanic
+
+; Stack management
+lua_gettop = lua51_orig.lua_gettop
+lua_settop = lua51_orig.lua_settop
+lua_pushvalue = lua51_orig.lua_pushvalue
+lua_remove = lua51_orig.lua_remove
+lua_insert = lua51_orig.lua_insert
+lua_replace = lua51_orig.lua_replace
+lua_checkstack = lua51_orig.lua_checkstack
+lua_xmove = lua51_orig.lua_xmove
+
+; Access (stack → C)
+lua_isnumber = lua51_orig.lua_isnumber
+lua_isstring = lua51_orig.lua_isstring
+lua_iscfunction = lua51_orig.lua_iscfunction
+lua_isuserdata = lua51_orig.lua_isuserdata
+lua_type = lua51_orig.lua_type
+lua_typename = lua51_orig.lua_typename
+lua_equal = lua51_orig.lua_equal
+lua_rawequal = lua51_orig.lua_rawequal
+lua_lessthan = lua51_orig.lua_lessthan
+lua_tonumber = lua51_orig.lua_tonumber
+lua_tointeger = lua51_orig.lua_tointeger
+lua_toboolean = lua51_orig.lua_toboolean
+lua_tolstring = lua51_orig.lua_tolstring
+lua_objlen = lua51_orig.lua_objlen
+lua_tocfunction = lua51_orig.lua_tocfunction
+lua_touserdata = lua51_orig.lua_touserdata
+lua_tothread = lua51_orig.lua_tothread
+lua_topointer = lua51_orig.lua_topointer
+
+; Push (C → stack)
+lua_pushnil = lua51_orig.lua_pushnil
+lua_pushnumber = lua51_orig.lua_pushnumber
+lua_pushinteger = lua51_orig.lua_pushinteger
+lua_pushlstring = lua51_orig.lua_pushlstring
+lua_pushstring = lua51_orig.lua_pushstring
+lua_pushvfstring = lua51_orig.lua_pushvfstring
+lua_pushfstring = lua51_orig.lua_pushfstring
+lua_pushcclosure = lua51_orig.lua_pushcclosure
+lua_pushboolean = lua51_orig.lua_pushboolean
+lua_pushlightuserdata = lua51_orig.lua_pushlightuserdata
+lua_pushthread = lua51_orig.lua_pushthread
+
+; Get (Lua → stack)
+lua_gettable = lua51_orig.lua_gettable
+lua_getfield = lua51_orig.lua_getfield
+lua_rawget = lua51_orig.lua_rawget
+lua_rawgeti = lua51_orig.lua_rawgeti
+lua_createtable = lua51_orig.lua_createtable
+lua_newuserdata = lua51_orig.lua_newuserdata
+lua_getmetatable = lua51_orig.lua_getmetatable
+lua_getfenv = lua51_orig.lua_getfenv
+
+; Set (stack → Lua)
+lua_settable = lua51_orig.lua_settable
+lua_setfield = lua51_orig.lua_setfield
+lua_rawset = lua51_orig.lua_rawset
+lua_rawseti = lua51_orig.lua_rawseti
+lua_setmetatable = lua51_orig.lua_setmetatable
+lua_setfenv = lua51_orig.lua_setfenv
+
+; Load and call
+lua_call = lua51_orig.lua_call
+lua_pcall = lua51_orig.lua_pcall
+lua_cpcall = lua51_orig.lua_cpcall
+lua_load = lua51_orig.lua_load
+lua_dump = lua51_orig.lua_dump
+
+; Coroutines
+lua_yield = lua51_orig.lua_yield
+lua_resume = lua51_orig.lua_resume
+lua_status = lua51_orig.lua_status
+
+; GC
+lua_gc = lua51_orig.lua_gc
+
+; Miscellaneous
+lua_error = lua51_orig.lua_error
+lua_next = lua51_orig.lua_next
+lua_concat = lua51_orig.lua_concat
+lua_getallocf = lua51_orig.lua_getallocf
+lua_setallocf = lua51_orig.lua_setallocf
+
+; Debug
+lua_getstack = lua51_orig.lua_getstack
+lua_getinfo = lua51_orig.lua_getinfo
+lua_getlocal = lua51_orig.lua_getlocal
+lua_setlocal = lua51_orig.lua_setlocal
+lua_getupvalue = lua51_orig.lua_getupvalue
+lua_setupvalue = lua51_orig.lua_setupvalue
+lua_sethook = lua51_orig.lua_sethook
+lua_gethook = lua51_orig.lua_gethook
+lua_gethookmask = lua51_orig.lua_gethookmask
+lua_gethookcount = lua51_orig.lua_gethookcount
+
+; lauxlib
+luaL_register = lua51_orig.luaL_register
+luaL_getmetafield = lua51_orig.luaL_getmetafield
+luaL_callmeta = lua51_orig.luaL_callmeta
+luaL_typerror = lua51_orig.luaL_typerror
+luaL_argerror = lua51_orig.luaL_argerror
+luaL_checklstring = lua51_orig.luaL_checklstring
+luaL_optlstring = lua51_orig.luaL_optlstring
+luaL_checknumber = lua51_orig.luaL_checknumber
+luaL_optnumber = lua51_orig.luaL_optnumber
+luaL_checkinteger = lua51_orig.luaL_checkinteger
+luaL_optinteger = lua51_orig.luaL_optinteger
+luaL_checkstack = lua51_orig.luaL_checkstack
+luaL_checktype = lua51_orig.luaL_checktype
+luaL_checkany = lua51_orig.luaL_checkany
+luaL_newmetatable = lua51_orig.luaL_newmetatable
+luaL_checkudata = lua51_orig.luaL_checkudata
+luaL_where = lua51_orig.luaL_where
+luaL_error = lua51_orig.luaL_error
+luaL_checkoption = lua51_orig.luaL_checkoption
+luaL_ref = lua51_orig.luaL_ref
+luaL_unref = lua51_orig.luaL_unref
+luaL_loadfile = lua51_orig.luaL_loadfile
+luaL_loadbuffer = lua51_orig.luaL_loadbuffer
+luaL_loadstring = lua51_orig.luaL_loadstring
+luaL_newstate = lua51_orig.luaL_newstate
+luaL_gsub = lua51_orig.luaL_gsub
+luaL_findtable = lua51_orig.luaL_findtable
+luaL_buffinit = lua51_orig.luaL_buffinit
+luaL_prepbuffer = lua51_orig.luaL_prepbuffer
+luaL_addlstring = lua51_orig.luaL_addlstring
+luaL_addstring = lua51_orig.luaL_addstring
+luaL_addvalue = lua51_orig.luaL_addvalue
+luaL_pushresult = lua51_orig.luaL_pushresult
+
+; Standard libraries
+luaopen_base = lua51_orig.luaopen_base
+luaopen_table = lua51_orig.luaopen_table
+luaopen_io = lua51_orig.luaopen_io
+luaopen_os = lua51_orig.luaopen_os
+luaopen_string = lua51_orig.luaopen_string
+luaopen_math = lua51_orig.luaopen_math
+luaopen_debug = lua51_orig.luaopen_debug
+luaopen_package = lua51_orig.luaopen_package
+luaL_openlibs = lua51_orig.luaL_openlibs

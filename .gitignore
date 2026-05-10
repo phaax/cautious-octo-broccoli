@@ -1,0 +1,48 @@
+# OS junk
+.DS_Store
+._*
+Thumbs.db
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.lnk
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# IDE and editor state
+.vs/
+.vscode/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.userprefs
+
+# .NET build output
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+artifacts/
+TestResults/
+*.nupkg
+*.nuget.props
+*.nuget.targets
+project.lock.json
+project.fragment.lock.json
+
+# Native and linker intermediates
+*.obj
+*.lib
+*.exp
+*.ilk
+*.pdb
+*.rsp
+*.cache
+
+# Runtime output
+*.log
+NoitaQuicksave/

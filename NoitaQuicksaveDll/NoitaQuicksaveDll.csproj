@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyName>lua51</AssemblyName>
+    <!-- NativeAOT: compiles to a true native DLL with no .NET runtime dependency -->
+    <PublishAot>true</PublishAot>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <LuaForwarderExportsFile>$(MSBuildProjectDirectory)\lua51_exports.def</LuaForwarderExportsFile>
+  </PropertyGroup>
+
+  <Target Name="CreateLuaForwarderExports"
+          BeforeTargets="LinkNative"
+          Condition="'$(_targetOS)' == 'win' and '$(PublishAot)' == 'true'">
+    <PropertyGroup>
+      <LuaForwarderImportLibrary>$(NativeIntermediateOutputPath)lua51_forwarders.lib</LuaForwarderImportLibrary>
+      <LuaForwarderExportsObject>$(NativeIntermediateOutputPath)lua51_forwarders.exp</LuaForwarderExportsObject>
+    </PropertyGroup>
+    <Exec Command="&quot;$(CppLibCreator)&quot; /nologo /machine:$(_targetArchitecture) /def:&quot;$(LuaForwarderExportsFile)&quot; /out:&quot;$(LuaForwarderImportLibrary)&quot;" />
+    <ItemGroup>
+      <LinkerArg Include="&quot;$(LuaForwarderExportsObject)&quot;" />
+    </ItemGroup>
+    <PropertyGroup>
+      <ExportsFile />
+    </PropertyGroup>
+  </Target>
+
+  <!--
+    Setup:
+      1. Rename noita's lua51.dll → lua51_orig.dll
+      2. dotnet publish -r win-x64 -c Release
+      3. Copy bin\Release\net8.0\win-x64\publish\lua51.dll next to noita.exe
+
+    Windows loads our lua51.dll first; it forwards all Lua calls to lua51_orig.dll
+    and runs the quicksave poller in a background thread via [ModuleInitializer].
+  -->
+
+</Project>
