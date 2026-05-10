@@ -227,7 +227,7 @@ luaL_typerror = lua51_orig.luaL_typerror
 luaL_unref = lua51_orig.luaL_unref
 luaL_where = lua51_orig.luaL_where
 lua_atpanic = lua51_orig.lua_atpanic
-lua_call = lua51_orig.lua_call
+lua_call
 lua_checkstack = lua51_orig.lua_checkstack
 lua_close = lua51_orig.lua_close
 lua_concat = lua51_orig.lua_concat
@@ -263,7 +263,7 @@ lua_newthread = lua51_orig.lua_newthread
 lua_newuserdata = lua51_orig.lua_newuserdata
 lua_next = lua51_orig.lua_next
 lua_objlen = lua51_orig.lua_objlen
-lua_pcall = lua51_orig.lua_pcall
+lua_pcall
 lua_pushboolean = lua51_orig.lua_pushboolean
 lua_pushcclosure = lua51_orig.lua_pushcclosure
 lua_pushfstring = lua51_orig.lua_pushfstring

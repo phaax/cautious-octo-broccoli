@@ -3,16 +3,18 @@
 A native DLL hijack for Noita that adds simple quicksave and quickload hotkeys.
 
 This project builds a replacement `lua51.dll`. When Noita loads it, the DLL starts a
-small background key poller and forwards Noita's normal Lua 5.1 exports to the
-original Lua DLL renamed as `lua51_orig.dll`.
+small background key poller and forwards most of Noita's normal LuaJIT exports to
+the original Lua DLL renamed as `lua51_orig.dll`.
 
 ## Features
 
 - `F5` creates a quicksave by copying Noita's `save00` directory.
 - `F9` restores the quicksave, restarts Noita, and terminates the old process so
   the restored save is not overwritten during normal shutdown.
+- In-game messages are sent through Noita's own `GamePrint` and
+  `GamePrintImportant` Lua functions without requiring a companion mod.
 - Backups are stored in a visible `NoitaQuicksave` directory beside `noita.exe`.
-- Logs are written beside the game as `noita_quicksave.log`.
+- Important events are logged beside the game as `noita_quicksave.log`.
 - Built as a 32-bit native C++ DLL to match Noita's 32-bit process.
 
 ## Warning
@@ -68,18 +70,27 @@ lua51_orig.dll  # Noita's original Lua DLL
 Backups are stored at:
 
 ```text
-<Noita game folder>\NoitaQuicksave\
+<Noita game folder>\NoitaQuicksave\save00\
 ```
 
-Logs are stored at:
+Important event logs are stored at:
 
 ```text
 <Noita game folder>\noita_quicksave.log
 ```
 
+## In-Game Messages
+
+The DLL intercepts Noita's imported `lua_call` and `lua_pcall` exports. Hotkey
+handling runs on a background thread, but it only queues UI messages. The queued
+messages are drained from Noita's Lua thread and displayed with Noita's own
+`GamePrint` or `GamePrintImportant` functions.
+
+This avoids requiring a companion mod, unsafe mod mode, or file polling.
+
 ## Save Locations
 
-The mod reads Noita's active save from:
+The DLL reads Noita's active save from:
 
 ```text
 %APPDATA%\..\LocalLow\Nolla_Games_Noita\save00
@@ -100,8 +111,8 @@ same directory as the replacement `lua51.dll`.
 
 ### F9 says no quicksave exists
 
-Press `F5` first and confirm that `<Noita game folder>\NoitaQuicksave\` was
-created.
+Press `F5` first and confirm that
+`<Noita game folder>\NoitaQuicksave\save00\` was created.
 
 ### Build fails with Lua unresolved externals
 
@@ -116,6 +127,11 @@ That usually means a 64-bit DLL was copied into Noita's 32-bit process. Build th
 
 ## Development Notes
 
-- `lua51_exports.def` lists the Lua 5.1 exports forwarded to `lua51_orig.dll`.
-- `NoitaQuicksave.cpp` handles the DLL entry point, `F5` and `F9`, save copying,
-  logging, and Noita restart.
+- `lua51_exports.def` lists the LuaJIT exports forwarded to `lua51_orig.dll`.
+- `NoitaQuicksave.cpp` owns the DLL entry point and hotkey poller.
+- `SaveManager.cpp` handles save path resolution, quicksave, quickload, and
+  process restart.
+- `GameMessages.cpp` owns the `lua_call` / `lua_pcall` hooks and in-game message
+  queue.
+- `Logger.cpp` and `Utility.cpp` contain shared logging, encoding, and path
+  helpers.
