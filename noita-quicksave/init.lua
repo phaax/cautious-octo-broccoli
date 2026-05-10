@@ -6,9 +6,9 @@
 --   VK_PAUSE  (0x13) → quicksave was completed; show confirmation message.
 --   VK_SCROLL (0x91) → quickload files are in place; trigger world reload.
 --
--- SDL scancodes used by InputIsKeyJustDown:
-local KEY_PAUSE  = 119   -- Pause/Break
-local KEY_SCROLL = 78    -- Scroll Lock
+-- SDL2 scancodes used by InputIsKeyJustDown (from SDL_scancode.h):
+local KEY_PAUSE  = 72    -- SDL_SCANCODE_PAUSE
+local KEY_SCROLL = 71    -- SDL_SCANCODE_SCROLLLOCK
 
 local warned_no_helper = false
 
@@ -24,7 +24,8 @@ local function player_is_alive()
     return players ~= nil and #players > 0
 end
 
-function OnModInit()
+function OnWorldInitialized()
+    -- GamePrint is not visible during OnModInit (HUD not ready yet).
     if not helper_is_present() then
         GamePrint("[QuickSave] WARNING: NoitaQuicksaveHelper.exe not detected.")
         GamePrint("[QuickSave] Start the helper before launching Noita.")

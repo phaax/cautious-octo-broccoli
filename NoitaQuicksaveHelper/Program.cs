@@ -75,6 +75,14 @@ if (OperatingSystem.IsWindows())
         onF9: () => { _ = http.PostAsync("http://127.0.0.1:9518/quickload", null); }
     );
 
+    // app.StartAsync() does not register SIGINT handlers (only RunAsync does).
+    // Wire Ctrl-C explicitly so it unblocks the message loop below.
+    Console.CancelKeyPress += (_, e) =>
+    {
+        e.Cancel = true;  // prevent the CLR from killing the process immediately
+        KeyboardHook.StopMessageLoop();
+    };
+
     // Block the main thread on a Win32 message loop.
     // This is what delivers WH_KEYBOARD_LL callbacks; without it every
     // keypress system-wide lags ~300 ms while Windows times out waiting.
