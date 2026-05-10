@@ -1,10 +1,5 @@
 using NoitaQuicksaveHelper;
 
-// ---------------------------------------------------------------------------
-// Write sentinel so the safe Lua mod can confirm the helper is running.
-// This must happen BEFORE the game's VFS is snapshotted (i.e. before launch).
-// The user is expected to start this helper first, then launch Noita.
-// ---------------------------------------------------------------------------
 WriteSentinel();
 
 var save = new SaveManager();
@@ -15,7 +10,6 @@ var save = new SaveManager();
 var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.UseUrls("http://127.0.0.1:9518");
 builder.Logging.SetMinimumLevel(LogLevel.Warning);
-builder.Services.AddHttpClient();
 
 var app = builder.Build();
 
@@ -57,41 +51,51 @@ app.MapPost("/quickload", () =>
 });
 
 // ---------------------------------------------------------------------------
-// Global keyboard hook — intercept F5 / F9 before Noita sees them
+// Start the web server on the thread pool; keep the main thread free for the
+// Win32 message loop that WH_KEYBOARD_LL requires.
 // ---------------------------------------------------------------------------
-KeyboardHook? hook = null;
+var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
+lifetime.ApplicationStopping.Register(KeyboardHook.StopMessageLoop);
+
+// Fire-and-forget: ASP.NET runs on thread-pool threads.
+var serverTask = app.StartAsync();
+await serverTask;  // wait until the server is actually listening before hooking
+
+Console.WriteLine("NoitaQuicksaveHelper running on http://127.0.0.1:9518");
+
 if (OperatingSystem.IsWindows())
 {
-    hook = new KeyboardHook(
-        onF5: () => app.Services.GetRequiredService<IHttpClientFactory>()
-                        // Reuse HTTP API so all logic is in one place.
-                        // Fire-and-forget; hook callback must return quickly.
-                        .CreateClient().PostAsync("http://127.0.0.1:9518/quicksave", null),
-        onF9: () => app.Services.GetRequiredService<IHttpClientFactory>()
-                        .CreateClient().PostAsync("http://127.0.0.1:9518/quickload", null)
+    Console.WriteLine("Start Noita now. F5 = quicksave, F9 = quickload.");
+
+    // A plain static HttpClient is sufficient for fire-and-forget localhost calls.
+    var http = new HttpClient();
+
+    using var hook = new KeyboardHook(
+        onF5: () => { _ = http.PostAsync("http://127.0.0.1:9518/quicksave", null); },
+        onF9: () => { _ = http.PostAsync("http://127.0.0.1:9518/quickload", null); }
     );
+
+    // Block the main thread on a Win32 message loop.
+    // This is what delivers WH_KEYBOARD_LL callbacks; without it every
+    // keypress system-wide lags ~300 ms while Windows times out waiting.
+    KeyboardHook.RunMessageLoop();
+
+    await app.StopAsync();
 }
 else
 {
-    Console.WriteLine("Linux: keyboard hook not available. " +
-                      "Bind F5/F9 to curl calls via xbindkeys:");
+    Console.WriteLine("Linux: no keyboard hook available.");
+    Console.WriteLine("Bind F5/F9 in xbindkeys to:");
     Console.WriteLine("  curl -X POST http://127.0.0.1:9518/quicksave");
     Console.WriteLine("  curl -X POST http://127.0.0.1:9518/quickload");
+
+    await app.WaitForShutdownAsync();
 }
-
-Console.WriteLine("NoitaQuicksaveHelper running on http://127.0.0.1:9518");
-Console.WriteLine("Start Noita now. F5 = quicksave, F9 = quickload.");
-
-await app.RunAsync();
-
-hook?.Dispose();
 
 // ---------------------------------------------------------------------------
 
 static void WriteSentinel()
 {
-    // Walk up from the executable to find the mod's data directory.
-    // Expected layout: repo/NoitaQuicksaveHelper/bin/… and repo/noita-quicksave/data/
     var exe    = AppContext.BaseDirectory;
     var search = new DirectoryInfo(exe);
 
@@ -106,7 +110,6 @@ static void WriteSentinel()
         search = search.Parent;
     }
 
-    // If not found (e.g. installed separately), write to a well-known location.
     var fallback = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "NoitaQuicksaveHelper", "helper_running.txt");
