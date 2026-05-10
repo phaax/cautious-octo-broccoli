@@ -16,5 +16,10 @@ namespace noitaqs
     void SetGameMessageBaseDirectory(const std::filesystem::path& baseDir);
     void QueueGameMessage(const std::wstring& message, bool important = false);
     void LogAndQueue(const std::wstring& message, bool important = false);
+
+    // Request a quicksave to be executed on the next Lua thread tick.
+    // Safe to call from any thread.
+    void RequestSaveTrigger();
+
     void DrainGameMessages(lua_State* state);
 }

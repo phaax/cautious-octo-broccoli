@@ -17,6 +17,12 @@ namespace noitaqs
         fs::path g_save00;
         fs::path g_backup;
 
+        // Raw Win32 path copies — safe to access from DLL_PROCESS_DETACH.
+        wchar_t g_save00Raw[MAX_PATH * 2] = {};
+        wchar_t g_backupRaw[MAX_PATH * 2] = {};
+
+        volatile LONG g_quicksavePending = 0;
+
         fs::path ResolveSave00()
         {
             wchar_t appData[MAX_PATH]{};
@@ -32,7 +38,7 @@ namespace noitaqs
 
         bool IsSaveDirectory(const fs::path& path)
         {
-            return fs::exists(path / L"player.xml") && fs::exists(path / L"world");
+            return fs::exists(path / L"world");
         }
 
         void CopyDirectory(const fs::path& source, const fs::path& destination)
@@ -94,6 +100,10 @@ namespace noitaqs
 
         g_backup = g_baseDir / L"NoitaQuicksave" / L"save00";
 
+        // Store raw wchar_t copies for use in DLL_PROCESS_DETACH.
+        wcsncpy_s(g_save00Raw, g_save00.c_str(), _TRUNCATE);
+        wcsncpy_s(g_backupRaw, g_backup.c_str(), _TRUNCATE);
+
         SetGameMessageBaseDirectory(g_baseDir);
         InitializeLogging(g_baseDir / L"noita_quicksave.log");
     }
@@ -121,6 +131,92 @@ namespace noitaqs
 
         CopyDirectory(g_backup, g_save00);
         TouchAllFiles(g_save00);
+    }
+
+    void SetQuicksavePending()
+    {
+        InterlockedExchange(&g_quicksavePending, 1);
+    }
+
+    // Win32-only recursive directory removal (safe in DLL_PROCESS_DETACH).
+    static void Win32RemoveDir(const wchar_t* path)
+    {
+        wchar_t pattern[MAX_PATH * 2];
+        if (swprintf_s(pattern, L"%s\\*", path) < 0) return;
+
+        WIN32_FIND_DATAW fd{};
+        HANDLE h = FindFirstFileW(pattern, &fd);
+        if (h == INVALID_HANDLE_VALUE) return;
+
+        do {
+            if (wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0)
+                continue;
+            wchar_t child[MAX_PATH * 2];
+            if (swprintf_s(child, L"%s\\%s", path, fd.cFileName) < 0) continue;
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+                Win32RemoveDir(child);
+            else
+                DeleteFileW(child);
+        } while (FindNextFileW(h, &fd));
+
+        FindClose(h);
+        RemoveDirectoryW(path);
+    }
+
+    // Win32-only recursive directory copy (safe in DLL_PROCESS_DETACH).
+    static void Win32CopyDir(const wchar_t* src, const wchar_t* dst)
+    {
+        CreateDirectoryW(dst, nullptr);
+
+        wchar_t pattern[MAX_PATH * 2];
+        if (swprintf_s(pattern, L"%s\\*", src) < 0) return;
+
+        WIN32_FIND_DATAW fd{};
+        HANDLE h = FindFirstFileW(pattern, &fd);
+        if (h == INVALID_HANDLE_VALUE) return;
+
+        do {
+            if (wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0)
+                continue;
+            wchar_t srcChild[MAX_PATH * 2], dstChild[MAX_PATH * 2];
+            if (swprintf_s(srcChild, L"%s\\%s", src, fd.cFileName) < 0) continue;
+            if (swprintf_s(dstChild, L"%s\\%s", dst, fd.cFileName) < 0) continue;
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+                Win32CopyDir(srcChild, dstChild);
+            else
+                CopyFileW(srcChild, dstChild, FALSE);
+        } while (FindNextFileW(h, &fd));
+
+        FindClose(h);
+    }
+
+    void FinalizePendingQuicksave()
+    {
+        if (InterlockedCompareExchange(&g_quicksavePending, 0, 1) == 0)
+            return;
+        if (g_save00Raw[0] == L'\0' || g_backupRaw[0] == L'\0')
+            return;
+
+        Win32RemoveDir(g_backupRaw);
+        Win32CopyDir(g_save00Raw, g_backupRaw);
+
+        // Relaunch Noita. GetModuleFileNameW is safe in DLL_PROCESS_DETACH.
+        wchar_t exePath[MAX_PATH]{};
+        if (GetModuleFileNameW(nullptr, exePath, static_cast<DWORD>(std::size(exePath))) == 0)
+            return;
+
+        // Derive the working directory (directory containing noita.exe).
+        wchar_t workDir[MAX_PATH]{};
+        wcsncpy_s(workDir, exePath, _TRUNCATE);
+        wchar_t* lastSlash = wcsrchr(workDir, L'\\');
+        if (lastSlash) *lastSlash = L'\0';
+
+        STARTUPINFOW si{};
+        si.cb = sizeof(si);
+        PROCESS_INFORMATION pi{};
+        CreateProcessW(exePath, nullptr, nullptr, nullptr, FALSE, 0, nullptr, workDir, &si, &pi);
+        if (pi.hProcess) CloseHandle(pi.hProcess);
+        if (pi.hThread)  CloseHandle(pi.hThread);
     }
 
     void RestartNoita()

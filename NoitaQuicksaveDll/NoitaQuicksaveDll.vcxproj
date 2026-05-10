@@ -57,6 +57,7 @@
     <ClCompile Include="GameMessages.cpp" />
     <ClCompile Include="Logger.cpp" />
     <ClCompile Include="NoitaQuicksave.cpp" />
+    <ClCompile Include="SaveFinder.cpp" />
     <ClCompile Include="SaveManager.cpp" />
     <ClCompile Include="Utility.cpp" />
   </ItemGroup>
@@ -64,6 +65,7 @@
   <ItemGroup>
     <ClInclude Include="GameMessages.h" />
     <ClInclude Include="Logger.h" />
+    <ClInclude Include="SaveFinder.h" />
     <ClInclude Include="SaveManager.h" />
     <ClInclude Include="Utility.h" />
   </ItemGroup>

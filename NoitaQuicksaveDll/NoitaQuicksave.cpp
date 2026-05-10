@@ -5,6 +5,7 @@
 
 #include "GameMessages.h"
 #include "Logger.h"
+#include "SaveFinder.h"
 #include "SaveManager.h"
 #include "Utility.h"
 
@@ -28,6 +29,7 @@ namespace
         try
         {
             noitaqs::InitializeSaveManager(g_module);
+            noitaqs::InitSaveFinder();
             noitaqs::LogAndQueue(L"Loaded. F5 = quicksave  |  F9 = quickload (restarts Noita)");
         }
         catch (const std::exception& ex)
@@ -47,8 +49,8 @@ namespace
 
                 if ((f5 & 0x8000) != 0 && (previousF5 & 0x8000) == 0)
                 {
-                    noitaqs::Quicksave();
-                    noitaqs::LogAndQueue(L"Quicksave created.");
+                    noitaqs::RequestSaveTrigger();
+                    noitaqs::LogAndQueue(L"Quicksave requested...");
                 }
 
                 if ((f9 & 0x8000) != 0 && (previousF9 & 0x8000) == 0)
@@ -79,7 +81,7 @@ namespace
     }
 }
 
-BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID)
+BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID lpReserved)
 {
     if (reason == DLL_PROCESS_ATTACH)
     {
@@ -93,6 +95,12 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID)
     }
     else if (reason == DLL_PROCESS_DETACH)
     {
+        // lpReserved is non-null when the process is terminating (ExitProcess),
+        // null when the DLL is being unloaded via FreeLibrary. Only finalize
+        // the quicksave on process termination — that's when the save files are ready.
+        if (lpReserved != nullptr)
+            noitaqs::FinalizePendingQuicksave();
+
         noitaqs::ShutdownGameMessages();
         noitaqs::ShutdownLogging();
     }

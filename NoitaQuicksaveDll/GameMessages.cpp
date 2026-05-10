@@ -1,8 +1,10 @@
 #include "GameMessages.h"
 
 #include "Logger.h"
+#include "SaveFinder.h"
 #include "Utility.h"
 
+#include <atomic>
 #include <deque>
 #include <stdexcept>
 
@@ -43,6 +45,7 @@ namespace noitaqs
         bool g_messageLockReady = false;
         fs::path g_baseDir;
         std::deque<QueuedMessage> g_messages;
+        std::atomic<bool> g_saveTriggerPending { false };
 
         LuaCallFn g_realLuaCall = nullptr;
         LuaGetFieldFn g_realLuaGetField = nullptr;
@@ -206,10 +209,43 @@ namespace noitaqs
         QueueGameMessage(message, important);
     }
 
+    void RequestSaveTrigger()
+    {
+        g_saveTriggerPending.store(true, std::memory_order_relaxed);
+    }
+
     void DrainGameMessages(lua_State* state)
     {
         if (state == nullptr)
             return;
+
+        if (g_saveTriggerPending.exchange(false, std::memory_order_relaxed))
+        {
+            try
+            {
+                // Flush session numbers via the Lua API
+                ResolveLuaFunctions();
+                int top = g_realLuaGetTop(state);
+                g_realLuaGetField(state, LUA_GLOBALSINDEX, "SessionNumbersSave");
+                if (g_realLuaType(state, -1) == LUA_TFUNCTION)
+                    g_realLuaPCall(state, 0, 0, 0);
+                g_realLuaSetTop(state, top);
+
+                // Post WM_CLOSE — the game will write all save files during its exit
+                // sequence. DLL_PROCESS_DETACH will copy the files and relaunch Noita
+                // once the process has fully exited and the save is complete.
+                TriggerNativeSave();
+                LogAndQueue(L"Quicksave in progress. Noita will restart...", true);
+            }
+            catch (const std::exception& ex)
+            {
+                LogAndQueue(std::wstring(L"Quicksave FAILED: ") + Widen(ex.what()), true);
+            }
+            catch (...)
+            {
+                LogAndQueue(L"Quicksave FAILED: unknown error.", true);
+            }
+        }
 
         QueuedMessage message{};
         for (int i = 0; i < 4 && TryTakeQueuedMessage(message); ++i)
