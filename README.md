@@ -8,9 +8,10 @@ the original Lua DLL renamed as `lua51_orig.dll`.
 
 ## Features
 
-- `F5` creates a quicksave by copying Noita's `save00` directory.
-- `F9` restores the quicksave, restarts Noita, and terminates the old process so
-  the restored save is not overwritten during normal shutdown.
+- `F5` triggers Noita's own save sequence and copies the result to the backup,
+  capturing your current inventory, health, wands, and perks. Noita restarts
+  automatically.
+- `F9` restores the quicksave and restarts Noita.
 - In-game messages are sent through Noita's own `GamePrint` and
   `GamePrintImportant` Lua functions without requiring a companion mod.
 - Backups are stored in a visible `NoitaQuicksave` directory beside `noita.exe`.
@@ -64,8 +65,8 @@ lua51_orig.dll  # Noita's original Lua DLL
 
 | Key | Action |
 | --- | --- |
-| `F5` | Create or overwrite the quicksave backup. |
-| `F9` | Restore the quicksave and restart Noita. |
+| `F5` | Save current state and restart Noita. |
+| `F9` | Restore the last quicksave and restart Noita. |
 
 Backups are stored at:
 
@@ -79,7 +80,21 @@ Important event logs are stored at:
 <Noita game folder>\noita_quicksave.log
 ```
 
-## In-Game Messages
+## How It Works
+
+### Save trigger
+
+Noita only writes `player.xml` and `world_state.xml` during its exit sequence —
+not while the game is running. When `F5` is pressed the DLL posts `WM_CLOSE` to
+the game window, which causes Noita to run its normal save-and-exit path. Once
+the process exits, `DLL_PROCESS_DETACH` copies the fully-written save files to
+the backup location and launches a new Noita process.
+
+At startup the DLL scans the loaded `noita.exe` image for save-related functions
+using debug strings embedded in the binary. These are logged to
+`noita_quicksave.log` for diagnostics.
+
+### In-game messages
 
 The DLL intercepts Noita's imported `lua_call` and `lua_pcall` exports. Hotkey
 handling runs on a background thread, but it only queues UI messages. The queued
@@ -129,8 +144,10 @@ That usually means a 64-bit DLL was copied into Noita's 32-bit process. Build th
 
 - `lua51_exports.def` lists the LuaJIT exports forwarded to `lua51_orig.dll`.
 - `NoitaQuicksave.cpp` owns the DLL entry point and hotkey poller.
-- `SaveManager.cpp` handles save path resolution, quicksave, quickload, and
-  process restart.
+- `SaveFinder.cpp` scans `noita.exe` at startup for save-related functions and
+  posts `WM_CLOSE` when a quicksave is triggered.
+- `SaveManager.cpp` handles save path resolution, quicksave, quickload, process
+  restart, and the `DLL_PROCESS_DETACH` file copy.
 - `GameMessages.cpp` owns the `lua_call` / `lua_pcall` hooks and in-game message
   queue.
 - `Logger.cpp` and `Utility.cpp` contain shared logging, encoding, and path
