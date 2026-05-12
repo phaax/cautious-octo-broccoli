@@ -458,7 +458,8 @@ namespace noitaqs
 
         // Pre-create the replacement Noita as a suspended process while we are still
         // outside DllMain. DLL_PROCESS_DETACH will only have to ResumeThread, which is
-        // loader-safe. If pre-creation fails we leave the fallback path active.
+        // loader-safe. PrepareSuspendedRestart bakes the --noitaqs-autocontinue arg
+        // into the command line so the new process knows to click Continue itself.
         if (!PrepareSuspendedRestart())
             Log(L"[SaveFinder] Could not pre-create suspended Noita; will retry from DllMain.");
 

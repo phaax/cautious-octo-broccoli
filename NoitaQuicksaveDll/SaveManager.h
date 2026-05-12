@@ -33,4 +33,10 @@ namespace noitaqs
     // Called from DLL_PROCESS_DETACH (process termination only) to copy the save files
     // and launch a new Noita process. Uses only Win32 APIs — no C++ runtime.
     void FinalizePendingQuicksave();
+
+    // Called from the poll thread every cycle. When the main menu is detected
+    // rendering (in-menu flag transitioned to non-zero), writes the Continue
+    // trigger byte so the next menu frame starts loading the save automatically.
+    // No-op when no auto-continue is pending.
+    void ProcessAutoContinueWatcher();
 }

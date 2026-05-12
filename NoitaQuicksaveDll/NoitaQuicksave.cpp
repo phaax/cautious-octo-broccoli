@@ -79,6 +79,8 @@ namespace
 
                 previousF5 = f5;
                 previousF9 = f9;
+
+                noitaqs::ProcessAutoContinueWatcher();
             }
             catch (const std::exception& ex)
             {

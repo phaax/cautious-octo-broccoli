@@ -16,12 +16,29 @@ namespace noitaqs
         fs::path g_save00;
         fs::path g_backup;
 
+        // Passed to the relaunched process on its command line — never written to
+        // disk, so a crashed restart can't strand a marker that triggers Continue
+        // on the next legitimate manual launch.
+        constexpr const wchar_t* kAutoContinueArg = L"--noitaqs-autocontinue";
+
         // Raw Win32 path copies — safe to access from DLL_PROCESS_DETACH.
         wchar_t g_save00Raw[MAX_PATH * 2] = {};
         wchar_t g_backupRaw[MAX_PATH * 2] = {};
         bool g_rawPathsValid = false;
 
         volatile LONG g_quicksavePending = 0;
+
+        // Set at DLL init when the launching process passed kAutoContinueArg.
+        // Cleared after the trigger fires or the address lookup fails. Only
+        // touched from the poll thread.
+        bool g_autoContinuePending = false;
+
+        // Noita's PE preferred base and the addresses (recorded against that base)
+        // of the in-main-menu flag and the Continue-pressed trigger. Rebased via
+        // the runtime module slide so the feature still works under ASLR.
+        constexpr uintptr_t kNoitaImageBase = 0x00400000;
+        constexpr uintptr_t kMainMenuFlagVA = 0x0120761B;
+        constexpr uintptr_t kContinueTriggerVA = 0x01207618;
 
         // Pre-created replacement Noita process (CREATE_SUSPENDED). Resumed from
         // DLL_PROCESS_DETACH. Resuming a thread is loader-safe; creating a process
@@ -71,6 +88,51 @@ namespace noitaqs
             }
         }
 
+        // SEH-protected single-byte memory probes. The Continue/menu addresses are
+        // rebased from a hardcoded build-time VA — if a future Noita patch shifts
+        // those globals out of writable memory, we want a clean disable, not an AV.
+        // Kept in their own functions because __try is incompatible with C++ object
+        // unwinding (no std::wstring or fs::path locals allowed).
+        bool SafeReadByte(const volatile uint8_t* address, uint8_t* outValue)
+        {
+            __try
+            {
+                *outValue = *address;
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        bool SafeWriteByte(volatile uint8_t* address, uint8_t value)
+        {
+            __try
+            {
+                *address = value;
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        bool CommandLineHasAutoContinueArg()
+        {
+            const wchar_t* cmdLine = GetCommandLineW();
+            return cmdLine != nullptr && wcsstr(cmdLine, kAutoContinueArg) != nullptr;
+        }
+
+        // Builds: "<exePath>" --noitaqs-autocontinue
+        // CreateProcessW may modify lpCommandLine, so callers must pass a writable
+        // local buffer. No C++ objects — safe to call from DLL_PROCESS_DETACH.
+        bool BuildAutoContinueCommandLine(wchar_t* dst, size_t cap, const wchar_t* exePath)
+        {
+            return swprintf_s(dst, cap, L"\"%s\" %s", exePath, kAutoContinueArg) > 0;
+        }
+
         void TouchAllFiles(const fs::path& root)
         {
             FILETIME now{};
@@ -103,8 +165,18 @@ namespace noitaqs
     {
         g_baseDir = GetModuleDirectory(module);
         g_save00 = ResolveSave00();
-
         g_backup = g_baseDir / L"NoitaQuicksave" / L"save00";
+
+        // Set up logging first so subsequent init steps can report status.
+        InitializeLogging(g_baseDir / L"noita_quicksave.log");
+
+        // If the launching process passed the auto-continue arg, the user pressed
+        // F5 or F9 there and expects the new process to land straight in the run.
+        if (CommandLineHasAutoContinueArg())
+        {
+            g_autoContinuePending = true;
+            Log(L"[SaveManager] Auto-continue armed: will press Continue when main menu loads.");
+        }
 
         // Store raw wchar_t copies for use in DLL_PROCESS_DETACH.
         // Refuse to mark the paths valid if either source exceeds the destination
@@ -125,8 +197,6 @@ namespace noitaqs
             g_backupRaw[0] = L'\0';
             g_rawPathsValid = false;
         }
-
-        InitializeLogging(g_baseDir / L"noita_quicksave.log");
     }
 
     bool HasQuicksaveBackup()
@@ -236,10 +306,14 @@ namespace noitaqs
         if (wchar_t* lastSlash = wcsrchr(workDir, L'\\'))
             *lastSlash = L'\0';
 
+        wchar_t cmdLine[MAX_PATH * 2 + 64]{};
+        if (!BuildAutoContinueCommandLine(cmdLine, std::size(cmdLine), exePath))
+            return false;
+
         STARTUPINFOW si{};
         si.cb = sizeof(si);
         PROCESS_INFORMATION pi{};
-        if (!CreateProcessW(exePath, nullptr, nullptr, nullptr, FALSE,
+        if (!CreateProcessW(exePath, cmdLine, nullptr, nullptr, FALSE,
                             CREATE_SUSPENDED, nullptr, workDir, &si, &pi))
             return false;
 
@@ -282,10 +356,14 @@ namespace noitaqs
         if (wchar_t* lastSlash = wcsrchr(workDir, L'\\'))
             *lastSlash = L'\0';
 
+        wchar_t cmdLine[MAX_PATH * 2 + 64]{};
+        if (!BuildAutoContinueCommandLine(cmdLine, std::size(cmdLine), exePath))
+            return;
+
         STARTUPINFOW si{};
         si.cb = sizeof(si);
         PROCESS_INFORMATION pi{};
-        CreateProcessW(exePath, nullptr, nullptr, nullptr, FALSE, 0, nullptr, workDir, &si, &pi);
+        CreateProcessW(exePath, cmdLine, nullptr, nullptr, FALSE, 0, nullptr, workDir, &si, &pi);
         if (pi.hProcess) CloseHandle(pi.hProcess);
         if (pi.hThread)  CloseHandle(pi.hThread);
     }
@@ -297,13 +375,17 @@ namespace noitaqs
         if (length == 0 || length == std::size(exePath))
             throw std::runtime_error("Could not resolve noita.exe path.");
 
+        wchar_t cmdLine[MAX_PATH * 2 + 64]{};
+        if (!BuildAutoContinueCommandLine(cmdLine, std::size(cmdLine), exePath))
+            throw std::runtime_error("Could not build relaunch command line.");
+
         STARTUPINFOW startup{};
         startup.cb = sizeof(startup);
 
         PROCESS_INFORMATION process{};
         BOOL created = CreateProcessW(
             exePath,
-            nullptr,
+            cmdLine,
             nullptr,
             nullptr,
             FALSE,
@@ -320,5 +402,39 @@ namespace noitaqs
         CloseHandle(process.hThread);
 
         TerminateProcess(GetCurrentProcess(), 0);
+    }
+
+    void ProcessAutoContinueWatcher()
+    {
+        if (!g_autoContinuePending)
+            return;
+
+        const uintptr_t moduleBase = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+        if (moduleBase == 0)
+            return;
+
+        const uintptr_t slide = moduleBase - kNoitaImageBase;
+        const volatile uint8_t* menuFlag =
+            reinterpret_cast<const volatile uint8_t*>(kMainMenuFlagVA + slide);
+        volatile uint8_t* continueTrigger =
+            reinterpret_cast<volatile uint8_t*>(kContinueTriggerVA + slide);
+
+        uint8_t flagValue = 0;
+        if (!SafeReadByte(menuFlag, &flagValue))
+        {
+            Log(L"[SaveManager] Auto-continue: menu flag address not readable; disabling.");
+            g_autoContinuePending = false;
+            return;
+        }
+
+        if (flagValue == 0)
+            return;
+
+        if (SafeWriteByte(continueTrigger, 1))
+            Log(L"[SaveManager] Auto-continue: pressing Continue.");
+        else
+            Log(L"[SaveManager] Auto-continue: trigger address not writable; disabling.");
+
+        g_autoContinuePending = false;
     }
 }
