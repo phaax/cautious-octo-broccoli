@@ -90,8 +90,8 @@ namespace noitaqs
         // (opcode 0x68 + 4-byte immediate), then walks backwards to find the
         // enclosing function's start address.
         SaveFn FindFunctionViaString(
-            const uint8_t* moduleBase,
-            size_t moduleSize,
+            const uint8_t* rdataStart,
+            size_t rdataSize,
             const uint8_t* textStart,
             size_t textSize,
             const char* searchString,
@@ -100,7 +100,7 @@ namespace noitaqs
             const auto* needle = reinterpret_cast<const uint8_t*>(searchString);
             size_t needleLen = strlen(searchString);
 
-            const uint8_t* stringAddr = FindBytes(moduleBase, moduleSize, needle, needleLen);
+            const uint8_t* stringAddr = FindBytes(rdataStart, rdataSize, needle, needleLen);
             if (stringAddr == nullptr)
             {
                 Log(std::wstring(L"[SaveFinder] String not found: ")
@@ -126,8 +126,10 @@ namespace noitaqs
                 if (fnStart != nullptr)
                     return reinterpret_cast<SaveFn>(fnStart);
 
-                Log(L"[SaveFinder] Found string reference but could not locate function boundary.");
-                return nullptr;
+                // Could not detect a boundary for this push reference. Keep searching —
+                // another push of the same string may be inside a function whose
+                // boundary is detectable.
+                Log(L"[SaveFinder] String reference at unrecognized boundary; trying next.");
             }
 
             Log(std::wstring(L"[SaveFinder] No code reference found for: ")
@@ -192,6 +194,152 @@ namespace noitaqs
             return nullptr;
         }
 
+#if 0  // Investigation helpers — retained for reference, not built into release DLL.
+        // Investigation helper: scans .text for E8 calls to targetVA and, for each one,
+        // logs the bytes preceding the call so we can identify the calling convention
+        // (e.g. `8B 0D xx xx xx xx` before an E8 means `mov ecx, [imm32]; call ...`,
+        // which is __thiscall with `this` loaded from a global singleton).
+        void LogCallSiteContext(
+            const wchar_t* label,
+            const uint8_t* textStart, size_t textSize,
+            uintptr_t targetVA,
+            int maxLogged)
+        {
+            constexpr size_t kPreBytes = 24;
+            int logged = 0;
+
+            for (size_t i = 0; i + 5 <= textSize && logged < maxLogged; ++i)
+            {
+                if (textStart[i] != 0xE8)
+                    continue;
+
+                int32_t rel = *reinterpret_cast<const int32_t*>(textStart + i + 1);
+                uintptr_t calledVA = reinterpret_cast<uintptr_t>(textStart + i + 5)
+                                     + static_cast<uintptr_t>(rel);
+                if (calledVA != targetVA)
+                    continue;
+
+                const uint8_t* callSite = textStart + i;
+                size_t lookback = (i < kPreBytes) ? i : kPreBytes;
+
+                // Oversize to give the final "%02X " write its trailing null room.
+                wchar_t hex[kPreBytes * 4 + 8] = {};
+                size_t hexLen = 0;
+                for (size_t k = 0; k < lookback; ++k)
+                {
+                    uint8_t byteVal = *(callSite - lookback + k);
+                    int n = swprintf_s(hex + hexLen, std::size(hex) - hexLen, L"%02X ", byteVal);
+                    if (n <= 0) break;
+                    hexLen += static_cast<size_t>(n);
+                }
+
+                wchar_t line[256];
+                swprintf_s(line,
+                    L"[SaveFinder] %s caller at 0x%p: pre=[%s] call=E8 %02X %02X %02X %02X",
+                    label, callSite, hex,
+                    callSite[1], callSite[2], callSite[3], callSite[4]);
+                Log(line);
+                ++logged;
+            }
+
+            if (logged == 0)
+            {
+                wchar_t line[128];
+                swprintf_s(line, L"[SaveFinder] No callers found for %s.", label);
+                Log(line);
+            }
+        }
+
+        // Logs the first N bytes of `fn` so we can read its prologue and body.
+        // Used to locate the Game singleton load (`mov eax, [imm32]` or `A1 imm32`)
+        // immediately after the security-cookie setup.
+        void LogFunctionBytes(const wchar_t* label, const uint8_t* fn, size_t bytes)
+        {
+            if (fn == nullptr) return;
+
+            constexpr size_t kPerLine = 32;
+            for (size_t off = 0; off < bytes; off += kPerLine)
+            {
+                size_t chunk = (bytes - off < kPerLine) ? (bytes - off) : kPerLine;
+                wchar_t hex[kPerLine * 4 + 8] = {};
+                size_t hexLen = 0;
+                for (size_t i = 0; i < chunk; ++i)
+                {
+                    int n = swprintf_s(hex + hexLen, std::size(hex) - hexLen,
+                                       L"%02X ", fn[off + i]);
+                    if (n <= 0) break;
+                    hexLen += static_cast<size_t>(n);
+                }
+                wchar_t line[256];
+                swprintf_s(line, L"[SaveFinder] %s+0x%03zX: %s",
+                           label, off, hex);
+                Log(line);
+            }
+        }
+
+        // Scan .rdata for occurrences of targetVA as a 32-bit little-endian dword.
+        // Hits are almost always vtable entries or function-pointer tables. Logs
+        // `slotsBefore` slots before and `slotsAfter` after the match, one slot per
+        // line, so vtable boundaries (transition to garbage/strings) are easy to spot.
+        void LogPointerOccurrences(
+            const wchar_t* label,
+            uintptr_t targetVA,
+            const uint8_t* rdataStart, size_t rdataSize,
+            int maxMatches,
+            int slotsBefore = 4,
+            int slotsAfter = 4)
+        {
+            const uint32_t needle = static_cast<uint32_t>(targetVA);
+            int matches = 0;
+
+            for (size_t i = 0; i + 4 <= rdataSize && matches < maxMatches; i += 4)
+            {
+                if (*reinterpret_cast<const uint32_t*>(rdataStart + i) != needle)
+                    continue;
+
+                wchar_t header[160];
+                swprintf_s(header,
+                    L"[SaveFinder] %s ptr in .rdata at 0x%p (vtable scan, %d before/%d after):",
+                    label, reinterpret_cast<const void*>(rdataStart + i),
+                    slotsBefore, slotsAfter);
+                Log(header);
+
+                for (int dw = -slotsBefore; dw <= slotsAfter; ++dw)
+                {
+                    const uint8_t* slotAddr = rdataStart + i + dw * 4;
+                    if (slotAddr < rdataStart || slotAddr + 4 > rdataStart + rdataSize)
+                        continue;
+                    uint32_t slot = *reinterpret_cast<const uint32_t*>(slotAddr);
+
+                    // Render the same 4 bytes as ASCII (for spotting RTTI strings).
+                    wchar_t ascii[5] = {};
+                    for (int b = 0; b < 4; ++b)
+                    {
+                        uint8_t c = slotAddr[b];
+                        ascii[b] = (c >= 0x20 && c < 0x7F) ? static_cast<wchar_t>(c) : L'.';
+                    }
+
+                    wchar_t line[160];
+                    swprintf_s(line,
+                        L"[SaveFinder]   %s 0x%p: %08X  '%s'",
+                        dw == 0 ? L"->" : L"  ",
+                        reinterpret_cast<const void*>(slotAddr),
+                        slot, ascii);
+                    Log(line);
+                }
+
+                ++matches;
+            }
+
+            if (matches == 0)
+            {
+                wchar_t buf[128];
+                swprintf_s(buf, L"[SaveFinder] %s NOT found in .rdata.", label);
+                Log(buf);
+            }
+        }
+#endif  // Investigation helpers
+
         std::pair<const uint8_t*, size_t> FindSection(const uint8_t* base, const char* name)
         {
             const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
@@ -223,10 +371,6 @@ namespace noitaqs
             return;
         }
 
-        const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(moduleBase);
-        const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(moduleBase + dos->e_lfanew);
-        size_t moduleSize = nt->OptionalHeader.SizeOfImage;
-
         auto [textStart, textSize] = FindSection(moduleBase, ".text");
         if (textStart == nullptr)
         {
@@ -234,10 +378,19 @@ namespace noitaqs
             return;
         }
 
+        // String literals live in .rdata; scanning the entire image (~100 MB for
+        // Noita) pulls cold pages and can be slow on first run.
+        auto [rdataStart, rdataSize] = FindSection(moduleBase, ".rdata");
+        if (rdataStart == nullptr)
+        {
+            Log(L"[SaveFinder] Could not locate .rdata section.");
+            return;
+        }
+
         // Player save: the first "??SAV/player.xml" push in .text is 151 bytes into
         // the player serialization function, well within the 16KB back-scan window.
         g_savePlayerFn = FindFunctionViaString(
-            moduleBase, moduleSize, textStart, textSize,
+            rdataStart, rdataSize, textStart, textSize,
             "??SAV/player.xml");
 
         if (g_savePlayerFn != nullptr)
@@ -250,7 +403,7 @@ namespace noitaqs
             Log(L"[SaveFinder] WARNING: SavePlayer function not found; player.xml will be stale in quicksaves.");
 
         g_saveWorldStateFn = FindFunctionViaString(
-            moduleBase, moduleSize, textStart, textSize,
+            rdataStart, rdataSize, textStart, textSize,
             "Saving world_state.xml - ");
 
         if (g_saveWorldStateFn != nullptr)
@@ -280,6 +433,7 @@ namespace noitaqs
         }
     }
 
+
     void TriggerNativeSave()
     {
         // The save is written during WinMain cleanup after the message loop exits, not
@@ -301,6 +455,13 @@ namespace noitaqs
         // (the save is written during WinMain cleanup, after the message loop exits,
         // not synchronously inside the WM_CLOSE handler itself).
         SetQuicksavePending();
+
+        // Pre-create the replacement Noita as a suspended process while we are still
+        // outside DllMain. DLL_PROCESS_DETACH will only have to ResumeThread, which is
+        // loader-safe. If pre-creation fails we leave the fallback path active.
+        if (!PrepareSuspendedRestart())
+            Log(L"[SaveFinder] Could not pre-create suspended Noita; will retry from DllMain.");
+
         PostMessage(hwnd, WM_CLOSE, 0, 0);
     }
 }

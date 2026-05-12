@@ -13,7 +13,6 @@ namespace noitaqs
 {
     void InitializeGameMessages(HMODULE module);
     void ShutdownGameMessages();
-    void SetGameMessageBaseDirectory(const std::filesystem::path& baseDir);
     void QueueGameMessage(const std::wstring& message, bool important = false);
     void LogAndQueue(const std::wstring& message, bool important = false);
 
@@ -21,5 +20,8 @@ namespace noitaqs
     // Safe to call from any thread.
     void RequestSaveTrigger();
 
-    void DrainGameMessages(lua_State* state);
+    // Drains the save trigger (always) and the message queue (only when allowPublish
+    // is true — callers set this to false when the originating pcall returned an
+    // error, so we don't pump Lua mid-error).
+    void DrainGameMessages(lua_State* state, bool allowPublish = true);
 }

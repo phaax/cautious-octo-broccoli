@@ -2,6 +2,7 @@
 
 #include "Logger.h"
 #include "SaveFinder.h"
+#include "SaveManager.h"
 #include "Utility.h"
 
 #include <atomic>
@@ -60,8 +61,7 @@ namespace noitaqs
             if (g_luaOriginal != nullptr)
                 return g_luaOriginal;
 
-            fs::path baseDir = g_baseDir.empty() ? GetModuleDirectory(g_module) : g_baseDir;
-            fs::path originalPath = baseDir / L"lua51_orig.dll";
+            fs::path originalPath = g_baseDir / L"lua51_orig.dll";
             g_luaOriginal = LoadLibraryW(originalPath.c_str());
             if (g_luaOriginal == nullptr)
                 g_luaOriginal = GetModuleHandleW(L"lua51_orig.dll");
@@ -164,6 +164,11 @@ namespace noitaqs
     {
         g_module = module;
 
+        // Resolve the module directory synchronously on the loader thread. The
+        // poll thread and Noita's main thread later read g_baseDir without
+        // synchronization, so it must be fully written before any thread starts.
+        g_baseDir = GetModuleDirectory(module);
+
         if (!g_messageLockReady)
         {
             InitializeCriticalSection(&g_messageLock);
@@ -180,11 +185,6 @@ namespace noitaqs
         }
     }
 
-    void SetGameMessageBaseDirectory(const fs::path& baseDir)
-    {
-        g_baseDir = baseDir;
-    }
-
     void QueueGameMessage(const std::wstring& message, bool important)
     {
         if (!g_messageLockReady)
@@ -192,11 +192,12 @@ namespace noitaqs
 
         EnterCriticalSection(&g_messageLock);
 
+        // Drop new messages at the cap rather than popping the front — drains that
+        // failed to publish push their messages back to the front, and popping front
+        // would silently delete those retries.
         constexpr size_t maxQueuedMessages = 16;
-        while (g_messages.size() >= maxQueuedMessages)
-            g_messages.pop_front();
-
-        g_messages.push_back({ message, important });
+        if (g_messages.size() < maxQueuedMessages)
+            g_messages.push_back({ message, important });
 
         LeaveCriticalSection(&g_messageLock);
     }
@@ -214,10 +215,26 @@ namespace noitaqs
         g_saveTriggerPending.store(true, std::memory_order_relaxed);
     }
 
-    void DrainGameMessages(lua_State* state)
+    // Re-entry guard: PublishGameMessage runs Lua code (GamePrint), which can
+    // call back into Noita C functions that import lua_call/lua_pcall. Those
+    // imports resolve to our hooks, which would recursively call DrainGameMessages.
+    // Without this guard, a flood of queued messages could blow the stack.
+    thread_local bool t_inDrain = false;
+
+    struct DrainGuard
     {
-        if (state == nullptr)
+        bool engaged = false;
+        ~DrainGuard() { if (engaged) t_inDrain = false; }
+    };
+
+    void DrainGameMessages(lua_State* state, bool allowPublish)
+    {
+        if (state == nullptr || t_inDrain)
             return;
+
+        DrainGuard guard;
+        t_inDrain = true;
+        guard.engaged = true;
 
         if (g_saveTriggerPending.exchange(false, std::memory_order_relaxed))
         {
@@ -247,21 +264,26 @@ namespace noitaqs
             }
         }
 
-        QueuedMessage message{};
-        for (int i = 0; i < 4 && TryTakeQueuedMessage(message); ++i)
+        // Publishing is suppressed when the originating pcall failed — pumping Lua
+        // mid-error is risky — but the save trigger above always runs.
+        if (allowPublish)
         {
-            try
+            QueuedMessage message{};
+            for (int i = 0; i < 4 && TryTakeQueuedMessage(message); ++i)
             {
-                if (!PublishGameMessage(state, message))
+                try
+                {
+                    if (!PublishGameMessage(state, message))
+                    {
+                        RestoreQueuedMessage(message);
+                        break;
+                    }
+                }
+                catch (...)
                 {
                     RestoreQueuedMessage(message);
-                    return;
+                    break;
                 }
-            }
-            catch (...)
-            {
-                RestoreQueuedMessage(message);
-                return;
             }
         }
     }
@@ -296,8 +318,9 @@ extern "C" __declspec(dllexport) int __cdecl lua_pcall(lua_State* state, int nar
     try
     {
         int result = noitaqs::PCallOriginalLua(state, nargs, nresults, errfunc);
-        if (result == 0)
-            noitaqs::DrainGameMessages(state);
+        // Always honor pending save triggers, but suppress message publishing on
+        // pcall failure to avoid pumping Lua mid-error.
+        noitaqs::DrainGameMessages(state, result == 0);
         return result;
     }
     catch (...)

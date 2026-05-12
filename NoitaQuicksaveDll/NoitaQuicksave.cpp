@@ -55,7 +55,16 @@ namespace
 
                 if ((f9 & 0x8000) != 0 && (previousF9 & 0x8000) == 0)
                 {
-                    if (!noitaqs::HasQuicksaveBackup())
+                    if (noitaqs::IsQuicksavePending())
+                    {
+                        // Noita is mid-exit and still holds open handles on save00,
+                        // so we can't remove_all it from here. Let the F5 finish
+                        // naturally; the user can press F9 in the restarted instance.
+                        noitaqs::LogAndQueue(
+                            L"Quickload ignored: quicksave in progress. Press F9 again after Noita restarts.",
+                            true);
+                    }
+                    else if (!noitaqs::HasQuicksaveBackup())
                     {
                         noitaqs::LogAndQueue(L"Quickload ignored: no quicksave found. Press F5 first.", true);
                     }
